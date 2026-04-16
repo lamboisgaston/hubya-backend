@@ -1,0 +1,228 @@
+// prisma/schema.prisma
+// HubYa — esquema de base de datos
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── PROVEEDORES ──────────────────────────────────────────
+model Proveedor {
+  id          Int      @id @default(autoincrement())
+  nombre      String
+  negocio     String
+  telefono    String   @unique  // número WP: 5491112345678
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  hubs        HubProveedor[]
+  productos   Producto[]
+  pedidos     Pedido[]
+  clientes    Cliente[]
+  movCaja     MovCaja[]
+  movSaldo    MovSaldo[]
+  sesiones    Sesion[]
+}
+
+// ── HUBS ─────────────────────────────────────────────────
+model Hub {
+  id          Int      @id @default(autoincrement())
+  nombre      String
+  barrio      String
+  provincia   String   @default("Buenos Aires")
+  lat         Float?
+  lng         Float?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  proveedores HubProveedor[]
+  clientes    Cliente[]
+  pedidos     Pedido[]
+}
+
+model HubProveedor {
+  id          Int      @id @default(autoincrement())
+  hubId       Int
+  proveedorId Int
+  activo      Boolean  @default(true)
+  diaReparto  String?  // Lunes, Martes, etc.
+  createdAt   DateTime @default(now())
+
+  hub         Hub       @relation(fields:[hubId], references:[id])
+  proveedor   Proveedor @relation(fields:[proveedorId], references:[id])
+
+  @@unique([hubId, proveedorId])
+}
+
+// ── CATEGORÍAS Y PRODUCTOS ───────────────────────────────
+model Categoria {
+  id          Int      @id @default(autoincrement())
+  nombre      String
+  emoji       String   @default("📦")
+  proveedorId Int
+  orden       Int      @default(0)
+
+  subcategorias Subcategoria[]
+  productos     Producto[]
+}
+
+model Subcategoria {
+  id          Int      @id @default(autoincrement())
+  nombre      String
+  categoriaId Int
+  orden       Int      @default(0)
+
+  categoria   Categoria  @relation(fields:[categoriaId], references:[id])
+  productos   Producto[]
+}
+
+model Producto {
+  id             Int      @id @default(autoincrement())
+  nombre         String
+  descripcion    String   @default("")
+  categoriaId    Int?
+  subcategoriaId Int?
+  proveedorId    Int
+  activo         Boolean  @default(true)
+  precioBase     Int      // en centavos para evitar decimales
+  createdAt      DateTime @default(now())
+
+  categoria    Categoria?    @relation(fields:[categoriaId], references:[id])
+  subcategoria Subcategoria? @relation(fields:[subcategoriaId], references:[id])
+  proveedor    Proveedor     @relation(fields:[proveedorId], references:[id])
+  descuentos   Descuento[]
+  itemsPedido  ItemPedido[]
+  itemsVenta   ItemVenta[]
+}
+
+model Descuento {
+  id         Int @id @default(autoincrement())
+  productoId Int
+  desde      Int  // cantidad mínima
+  hasta      Int  // cantidad máxima (999 = sin límite)
+  porcentaje Int  // ej: 7 = 7%
+
+  producto   Producto @relation(fields:[productoId], references:[id])
+}
+
+// ── CLIENTES ─────────────────────────────────────────────
+model Cliente {
+  id          Int      @id @default(autoincrement())
+  nombre      String
+  telefono    String              // número WP
+  hubId       Int?
+  proveedorId Int
+  saldo       Int      @default(0) // negativo = debe
+  limite      Int      @default(-10000) // límite de crédito (negativo)
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  hub         Hub?       @relation(fields:[hubId], references:[id])
+  proveedor   Proveedor  @relation(fields:[proveedorId], references:[id])
+  pedidos     Pedido[]
+  ventas      Venta[]
+
+  @@unique([telefono, proveedorId])
+}
+
+// ── PEDIDOS (rondas HubYa) ───────────────────────────────
+model Pedido {
+  id          Int      @id @default(autoincrement())
+  clienteId   Int
+  proveedorId Int
+  hubId       Int?
+  estado      String   @default("aceptacion") // aceptacion | aceptado | entregado | rechazado
+  horario     String?  // Mediodía | Tarde | Noche
+  total       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cliente     Cliente   @relation(fields:[clienteId], references:[id])
+  proveedor   Proveedor @relation(fields:[proveedorId], references:[id])
+  hub         Hub?      @relation(fields:[hubId], references:[id])
+  items       ItemPedido[]
+}
+
+model ItemPedido {
+  id         Int @id @default(autoincrement())
+  pedidoId   Int
+  productoId Int
+  cantidad   Int
+  precioUnit Int  // precio al momento del pedido
+
+  pedido     Pedido   @relation(fields:[pedidoId], references:[id])
+  producto   Producto @relation(fields:[productoId], references:[id])
+}
+
+// ── VENTAS AL PÚBLICO ────────────────────────────────────
+model Venta {
+  id          Int      @id @default(autoincrement())
+  clienteId   Int?
+  telefono    String?  // si no es cliente registrado
+  proveedorId Int
+  medio       String   // efectivo | banco
+  total       Int
+  cobrado     Int
+  createdAt   DateTime @default(now())
+
+  cliente     Cliente?   @relation(fields:[clienteId], references:[id])
+  items       ItemVenta[]
+}
+
+model ItemVenta {
+  id         Int @id @default(autoincrement())
+  ventaId    Int
+  productoId Int
+  cantidad   Int
+  precioUnit Int
+
+  venta    Venta    @relation(fields:[ventaId], references:[id])
+  producto Producto @relation(fields:[productoId], references:[id])
+}
+
+// ── CAJA ─────────────────────────────────────────────────
+model MovCaja {
+  id          Int      @id @default(autoincrement())
+  proveedorId Int
+  tipo        String   // cobro | pago_proveedor | gasto | venta
+  descripcion String
+  monto       Int      // positivo = entrada, negativo = salida
+  medio       String   // efectivo | banco
+  tieneFactura Boolean @default(false)
+  refId       Int?     // id del pedido/venta relacionado
+  refTipo     String?  // pedido | venta
+  createdAt   DateTime @default(now())
+
+  proveedor   Proveedor @relation(fields:[proveedorId], references:[id])
+}
+
+// ── SALDO (debe/haber) ────────────────────────────────────
+model MovSaldo {
+  id          Int      @id @default(autoincrement())
+  proveedorId Int
+  lado        String   // H = haber | D = debe
+  descripcion String
+  monto       Int      // siempre positivo, el lado indica dirección
+  refId       Int?
+  refTipo     String?
+  createdAt   DateTime @default(now())
+
+  proveedor   Proveedor @relation(fields:[proveedorId], references:[id])
+}
+
+// ── SESIONES DE CONVERSACIÓN WP ──────────────────────────
+model Sesion {
+  id          Int      @id @default(autoincrement())
+  telefono    String   @unique  // número WP del usuario
+  tipo        String   // proveedor | vecino
+  proveedorId Int?
+  step        String   @default("start")   // paso actual del flujo
+  ctx         Json     @default("{}")       // contexto del flujo
+  updatedAt   DateTime @updatedAt
+
+  proveedor   Proveedor? @relation(fields:[proveedorId], references:[id])
+}

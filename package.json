@@ -1,0 +1,23 @@
+{
+  "name": "hubya-backend",
+  "version": "1.0.0",
+  "description": "HubYa WhatsApp Bot Backend",
+  "main": "src/index.js",
+  "scripts": {
+    "start":   "node src/index.js",
+    "dev":     "nodemon src/index.js",
+    "db:push": "npx prisma db push",
+    "db:seed": "node scripts/seed.js",
+    "db:studio":"npx prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.0",
+    "axios":          "^1.6.0",
+    "dotenv":         "^16.4.0",
+    "express":        "^4.18.0"
+  },
+  "devDependencies": {
+    "nodemon":        "^3.1.0",
+    "prisma":         "^5.10.0"
+  }
+}
