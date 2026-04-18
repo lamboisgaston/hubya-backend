@@ -1,42 +1,27 @@
-# Dependencias
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Variables de entorno (NUNCA subir)
 .env
 .env.local
 .env.*.local
 .env.development
 .env.production
 .env.test
-
-# Logs
-logs/
 *.log
-
-# Sistema operativo
+logs/
 .DS_Store
 Thumbs.db
-
-# Editores
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Build
 dist/
 build/
 coverage/
-
-# Prisma
 prisma/*.db
 prisma/*.db-journal
-
-# Temporales
 tmp/
 temp/
 *.tmp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
