@@ -155,3 +155,114 @@ exports.clientesVencidos = async (proveedorId) => {
   const clientes = await exports.getClientes(proveedorId);
   return clientes.filter(c => c.saldo < 0); // en producción filtraría por fecha de vencimiento
 };
+
+// ── VECINOS ───────────────────────────────────────────────
+exports.getVecino = (telefono) =>
+  prisma.vecino.findUnique({ where: { telefono } });
+
+exports.crearVecino = (data) =>
+  prisma.vecino.create({ data });
+
+exports.actualizarVecino = (id, data) =>
+  prisma.vecino.update({ where: { id }, data });
+
+exports.getHubs = () =>
+  prisma.hub.findMany({ where: { activo: true } });
+
+exports.contarIntegrantesHub = (hubId) =>
+  prisma.vecino.count({ where: { hubId } });
+
+// Saldo total del vecino sumando todos sus registros de Cliente
+exports.getSaldoVecino = async (telefono) => {
+  const clientes = await prisma.cliente.findMany({ where: { telefono } });
+  return clientes.reduce((s, c) => s + c.saldo, 0);
+};
+
+// ── SOLICITUDES DE SERVICIO ───────────────────────────────
+exports.crearSolicitud = (data) =>
+  prisma.solicitudServicio.create({ data });
+
+exports.getSolicitudPendiente = (id) =>
+  prisma.solicitudServicio.findUnique({
+    where:   { id },
+    include: { hub: true, proveedor: true },
+  });
+
+exports.getSolicitudesPendientes = (limite = 10) =>
+  prisma.solicitudServicio.findMany({
+    where:   { estado: "pendiente" },
+    include: { hub: true },
+    orderBy: { createdAt: "desc" },
+    take:    limite,
+  });
+
+exports.actualizarSolicitud = (id, data) =>
+  prisma.solicitudServicio.update({ where: { id }, data });
+
+// ── VOTACIONES ────────────────────────────────────────────
+exports.getVotosPropuesta = (hubId, propuesta) =>
+  prisma.voto.findMany({ where: { hubId, propuesta } });
+
+exports.getPropuestasHub = (hubId) =>
+  prisma.voto.groupBy({
+    by:    ["propuesta"],
+    where: { hubId },
+    _count: { opcion: true },
+  });
+
+exports.registrarVoto = (hubId, telefono, propuesta, opcion) =>
+  prisma.voto.upsert({
+    where:  { hubId_telefono_propuesta: { hubId, telefono, propuesta } },
+    update: { opcion },
+    create: { hubId, telefono, propuesta, opcion },
+  });
+
+// ── RONDAS COLECTIVAS ─────────────────────────────────────
+exports.pedidosRondaActiva = (proveedorId) =>
+  prisma.pedido.findMany({
+    where:   { proveedorId, estado: "aceptacion" },
+    include: {
+      cliente: true,
+      hub:     true,
+      items:   { include: { producto: { include: { descuentos: true } } } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+// Cierra la ronda: aprueba pedidos y acredita diferencias por descuento de volumen
+exports.cerrarRonda = async (proveedorId) => {
+  const pedidos = await exports.pedidosRondaActiva(proveedorId);
+  if (!pedidos.length) return 0;
+
+  // Sumar cantidades totales por producto para calcular descuento colectivo
+  const totalesProd = {};
+  for (const p of pedidos) {
+    for (const item of p.items) {
+      totalesProd[item.productoId] = (totalesProd[item.productoId] || 0) + item.cantidad;
+    }
+  }
+
+  // Acreditar diferencia a cada vecino
+  for (const pedido of pedidos) {
+    let diferencia = 0;
+    for (const item of pedido.items) {
+      const cantTotal  = totalesProd[item.productoId] || item.cantidad;
+      const precioFinal = exports.calcularPrecio(item.producto, cantTotal);
+      diferencia += (item.precioUnit - precioFinal) * item.cantidad;
+    }
+    if (diferencia > 0) {
+      await exports.updateSaldoCliente(pedido.clienteId, diferencia);
+      await exports.agregarMovSaldo(proveedorId, {
+        lado:        "D",
+        descripcion: `Descuento ronda #${pedido.id} — ${pedido.cliente.nombre}`,
+        monto:       diferencia,
+        refId:       pedido.id,
+        refTipo:     "pedido",
+      });
+    }
+  }
+
+  // Marcar todos como aceptados
+  await exports.aceptarTodosPedidos(proveedorId);
+  return pedidos.length;
+};

@@ -19,13 +19,14 @@ model Proveedor {
   activo      Boolean  @default(true)
   createdAt   DateTime @default(now())
 
-  hubs        HubProveedor[]
-  productos   Producto[]
-  pedidos     Pedido[]
-  clientes    Cliente[]
-  movCaja     MovCaja[]
-  movSaldo    MovSaldo[]
-  sesiones    Sesion[]
+  hubs               HubProveedor[]
+  productos          Producto[]
+  pedidos            Pedido[]
+  clientes           Cliente[]
+  movCaja            MovCaja[]
+  movSaldo           MovSaldo[]
+  sesiones           Sesion[]
+  solicitudesServicio SolicitudServicio[]
 }
 
 // ── HUBS ─────────────────────────────────────────────────
@@ -42,6 +43,9 @@ model Hub {
   proveedores HubProveedor[]
   clientes    Cliente[]
   pedidos     Pedido[]
+  vecinos     Vecino[]
+  solicitudes SolicitudServicio[]
+  votos       Voto[]
 }
 
 model HubProveedor {
@@ -225,4 +229,50 @@ model Sesion {
   updatedAt   DateTime @updatedAt
 
   proveedor   Proveedor? @relation(fields:[proveedorId], references:[id])
+}
+
+// ── VECINOS (identidad del usuario barrial) ───────────────
+model Vecino {
+  id        Int      @id @default(autoincrement())
+  nombre    String
+  telefono  String   @unique
+  hubId     Int?
+  lat       Float?
+  lng       Float?
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  hub       Hub? @relation(fields:[hubId], references:[id])
+}
+
+// ── SOLICITUDES DE SERVICIO (JardinerosYA / FumigadoresYA) ─
+model SolicitudServicio {
+  id             Int      @id @default(autoincrement())
+  tipo           String   // jardineros | fumigadores
+  telefonoVecino String
+  nombreVecino   String
+  descripcion    String?
+  hubId          Int?
+  proveedorId    Int?     // asignado al aceptar
+  estado         String   @default("pendiente") // pendiente | asignado | completado | cancelado
+  lat            Float?
+  lng            Float?
+  createdAt      DateTime @default(now())
+
+  hub       Hub?       @relation(fields:[hubId], references:[id])
+  proveedor Proveedor? @relation(fields:[proveedorId], references:[id])
+}
+
+// ── VOTACIONES DE HUB ─────────────────────────────────────
+model Voto {
+  id        Int      @id @default(autoincrement())
+  hubId     Int
+  telefono  String
+  propuesta String
+  opcion    String   // si | no | abstencion
+  createdAt DateTime @default(now())
+
+  hub Hub @relation(fields:[hubId], references:[id])
+
+  @@unique([hubId, telefono, propuesta])
 }

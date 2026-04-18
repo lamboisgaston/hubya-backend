@@ -56,10 +56,21 @@ exports.receive = async (req, res) => {
           } else if (tipo === "interactive") {
             const inter = msg.interactive;
             if (inter.type === "button_reply") {
-              input = { tipo: "boton", valor: inter.button_reply.id, label: inter.button_reply.title };
+              const id = inter.button_reply.id;
+              console.log(`🔘 [${telefono}] button_reply id: ${id}`);
+              input = { tipo: "boton", valor: id, label: inter.button_reply.title };
             } else if (inter.type === "list_reply") {
-              input = { tipo: "lista", valor: inter.list_reply.id, label: inter.list_reply.title };
+              const id = inter.list_reply.id;
+              console.log(`📋 [${telefono}] list_reply id: ${id}`);
+              input = { tipo: "lista", valor: id, label: inter.list_reply.title };
             }
+          } else if (tipo === "location") {
+            input = {
+              tipo:  "ubicacion",
+              valor: `${msg.location.latitude},${msg.location.longitude}`,
+              lat:   msg.location.latitude,
+              lng:   msg.location.longitude,
+            };
           } else if (tipo === "image" || tipo === "document") {
             // El usuario mandó una foto/PDF (factura, comprobante)
             input = {
@@ -81,9 +92,16 @@ exports.receive = async (req, res) => {
           // Procesar en el motor de flujo
           const respuesta = await flowService.procesar(sesion, input);
 
-          // Enviar respuestas
+          // Enviar respuestas al usuario
           for (const m of respuesta.mensajes) {
             await wpService.enviar(telefono, m);
+          }
+
+          // Notificaciones push a terceros (ej: proveedores en vínculo doble de servicios)
+          if (respuesta.notificar) {
+            for (const { destinatario, mensaje } of respuesta.notificar) {
+              await wpService.notificar(destinatario, mensaje);
+            }
           }
 
           // Guardar nuevo estado
