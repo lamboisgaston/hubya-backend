@@ -5,8 +5,8 @@
 
 ---
 
-## Proyecto
-
+## Proyecto- 
+**Documento de arquitectura completa:** `docs/ARCHITECTURE.md` ← **LEELO ANTES DE PROPONER CAMBIOS IMPORTANTES**
 **HubYa** es un marketplace local basado en WhatsApp que conecta vecinos con proveedores de productos y servicios dentro de "Hubs" (barrios, countries, edificios).
 
 - **Dueño/Dev principal:** Gastón (solo, en aprendizaje)
@@ -130,7 +130,7 @@ Cuando te pida agregar una funcionalidad, seguí este orden:
 ## Cómo hablarle a Gastón
 
 - Es desarrollador en aprendizaje y trabaja solo. **Explicá el "por qué" de cada decisión técnica**, no solo el "cómo".
-- Cuando propongas algo, si hay términos técnicos nuevos, definilos brevemente en contexto.
+- Cuando propongas algo, si hay términos técnicos nuevos, definilos brevemente en contexto. tiene memoria espacion le gustan las analogias con cuidades calles casa barrios para entende conceptos tecnicos. gaston tiene ambiciones grandes.
 - Preferí soluciones simples que funcionen hoy a soluciones "perfectas" que lo traben.
 - Nunca asumas que entiende un concepto por jerga. Si dudás, explicá.
 - Ante decisiones con trade-offs, presentá las opciones con pros y contras antes de recomendar.
