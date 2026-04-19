@@ -4,7 +4,8 @@ const eventBus = require("../../events/eventBus");
 const prisma = require("../../infrastructure/db");
 
 const ALPHABET          = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-const FOUNDER_THRESHOLD = 5;     // memberships necesarios para activar un hub pendiente
+// Umbral bajo para acelerar activación en etapa temprana. Subir cuando haya tracción.
+const FOUNDER_THRESHOLD = 2;     // memberships necesarios para activar un hub pendiente
 const NEARBY_RADIUS_M   = 1500;  // radio de búsqueda de hubs cercanos (spec 3.2)
 const OVERLAP_RADIUS_M  = 500;   // radio de solapamiento para bloquear hubs duplicados (spec 3.9)
 
@@ -219,6 +220,7 @@ async function editHub(userId, hubId, { name, description }) {
 }
 
 module.exports = {
+  FOUNDER_THRESHOLD,
   findHubsForLocation,
   foundHub,
   joinActiveHub,

@@ -1,5 +1,6 @@
-const hubService   = require("../modules/hubs/hub.service");
-const userService  = require("../modules/users/user.service");
+const hubService        = require("../modules/hubs/hub.service");
+const { FOUNDER_THRESHOLD } = hubService;
+const userService       = require("../modules/users/user.service");
 const { register } = require("./flow.engine");
 
 const FLOW_NAME = "share_location";
@@ -76,7 +77,7 @@ const steps = {
         messages: [
           {
             type: "text",
-            text: `En su zona aún no hay un hub activo, pero ${founderName} está organizando uno llamado "${pendingHub.name}". ${interestedText}. Se activará cuando lleguen a 5.`,
+            text: `En su zona aún no hay un hub activo, pero ${founderName} está organizando uno llamado "${pendingHub.name}". ${interestedText}. Se activará cuando lleguen a ${FOUNDER_THRESHOLD} vecinos interesados.`,
           },
           {
             type: "buttons",
@@ -104,7 +105,7 @@ const steps = {
       messages: [
         {
           type: "text",
-          text: "En su zona aún no hay un hub activo ni en formación. ¿Desea fundar uno usted mismo? Le enviaré un enlace para invitar a sus vecinos y el hub se activará cuando lleguen a 5 interesados.",
+          text: `En su zona aún no hay un hub activo ni en formación. ¿Desea fundar uno usted mismo? Le enviaré un enlace para invitar a sus vecinos y el hub se activará cuando lleguen a ${FOUNDER_THRESHOLD} vecinos interesados.`,
         },
         {
           type: "buttons",
