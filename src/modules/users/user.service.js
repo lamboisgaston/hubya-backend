@@ -17,7 +17,23 @@ async function findOrCreateByPhone(rawPhone) {
   return userRepository.create({ phoneNumber });
 }
 
+async function setDisplayName(userId, name) {
+  if (typeof name !== "string") throw new Error("name_invalid_type");
+
+  const trimmed = name.trim();
+  if (trimmed.length < 2) throw new Error("name_too_short");
+
+  const normalized = trimmed
+    .substring(0, 100)
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+
+  return userRepository.update(userId, { fullName: normalized });
+}
+
 module.exports = {
   findOrCreateByPhone,
   normalizeToE164,
+  setDisplayName,
 };
