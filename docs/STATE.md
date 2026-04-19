@@ -4,40 +4,38 @@ Este documento se actualiza al final de cada sesión de trabajo. Al iniciar la p
 
 ---
 
-**Última actualización:** 2026-04-19 (tarde)
-**Último commit:** `f1ba82a` — feat(pr3c2c): opción operar como individual + refactor Rama C con step await_no_hub_choice
+**Última actualización:** 2026-04-19 (noche)
+**Último commit:** `de67c65` — feat(pr3c2e): join-pending-or-found flow con 3 ramas según buttonId
 **Branch:** `main` (siempre trabajamos en main por ahora)
 
 ---
 
 ## En qué PR estamos
 
-**PR 3c.2** — Flows de fundar hub + sumarse a pendiente + operar como individual.
+**PR 3c.3** — Conectar el webhook al flow engine.
+
+### PR 3c.2 — COMPLETO
 
 Sub-pasos del PR 3c.2:
 
 - [x] **3c.2.a** — Umbral a 2 + constante centralizada en textos. Commit `7e5c0c2`.
 - [x] **3c.2.b** — Funciones nuevas en user.service: getCurrentState, updateLastLocation, markAsIndividual, findNearbyIndividuals (stub). Commit `6c149f1`.
 - [x] **3c.2.c** — Rama "operar solo" en share-location + refactor Rama C con step await_no_hub_choice. Commit `f1ba82a`.
-- [ ] **3c.2.d** — Crear src/flows/found-hub.flow.js. **← Próximo paso.**
-- [ ] **3c.2.e** — Crear src/flows/join-pending-or-found.flow.js.
-- [ ] **3c.2.f** — Posiblemente no necesario (el wire-up ya se hizo en 3c.2.c).
+- [x] **3c.2.d** — Crear src/flows/found-hub.flow.js. Commit `406b8c9`.
+- [x] **3c.2.e** — Crear src/flows/join-pending-or-found.flow.js. Commit `de67c65`.
+- **3c.2.f** — NO NECESARIO — el wire-up se integró en 3c.2.c.
 
 ---
 
 ## Próximo paso inmediato
 
-**PR 3c.2.d** — Crear `src/flows/found-hub.flow.js`.
+**PR 3c.3** — Conectar el webhook (`src/index.js`) al flow engine.
 
 Contexto necesario:
-- Spec v2 sección 5.1 y 7.3.
-- Steps: start → await_name → await_description.
-- Nombre del hub mínimo 2 caracteres.
-- Descripción obligatoria, mínimo 10 caracteres.
-- Al crear exitoso: usar `hubService.foundHub(...)` y entregar al fundador link (wa.me) + código corto (refCode) con mensaje explicativo.
-- Manejar errores conocidos: `YA_TIENE_HUB_PENDIENTE`, `HUB_CERCANO_EXISTENTE`.
-- Tono formal, de usted, en todos los mensajes.
-- Usar variable de entorno `META_PHONE_NUMBER` para armar el link (con placeholder si no está seteada).
+- El webhook actual no usa el motor de flows aún; sigue con el código legacy.
+- Hay que refactorizarlo para: (a) recibir mensajes de Meta, (b) normalizarlos al formato que espera el flow engine (`{ type, text, lat, lng, buttonId }`), (c) resolver usuario y conversación con los services, (d) llamar a `flow.engine.handle()`, (e) tomar los mensajes devueltos y enviarlos con `wpService`.
+- Además: detectar `ref_code` en mensajes entrantes y llamar a `hubService.joinByRefCode` ANTES de entrar al flow engine.
+- Este es el PR más delicado porque conecta WhatsApp con los flows. Hacerlo con paciencia, plan en prosa primero, commit chico.
 
 ---
 
@@ -50,14 +48,14 @@ Contexto necesario:
 - Módulo de conversaciones (repo + service) con getOrStartConversation, setFlow, setStep, completeConversation, resetIfExpired.
 - Motor de flows genérico (`flow.engine.js`) con register + handle + _applyTransition.
 - Flow onboarding (pide nombre, lo guarda, salta a share_location).
-- Flow share-location (3 ramas + step await_no_hub_choice para la rama C).
+- Flow share-location (4 ramas + step await_no_hub_choice para la rama C).
+- Flow de fundar hub (`found-hub.flow.js`): nombre, descripción mínimo 10 chars, link wa.me + código refCode, manejo de errores `YA_TIENE_HUB_PENDIENTE` y `HUB_CERCANO_EXISTENTE`.
+- Flow de decisión post-hub-pendiente (`join-pending-or-found.flow.js`): 3 ramas según buttonId (join_pending, found_own, operate_solo) + fallback.
 
 ## Lo que falta para que el bot funcione end-to-end
 
 | Pendiente | Qué es | PR |
 |-----------|--------|----|
-| Flow de fundar hub | src/flows/found-hub.flow.js | 3c.2.d |
-| Flow de sumarse / fundar / operar solo | src/flows/join-pending-or-found.flow.js | 3c.2.e |
 | Actualizar el webhook | src/index.js para que use el flow engine + detectar refCode en mensajes | 3c.3 |
 | Workers + Redis + BullMQ | Notificaciones asíncronas + worker de individuales cercanos | PR 4 |
 | Comandos de admin | /admin hubs pendientes, /admin aprobar, etc. | PR 5 |
