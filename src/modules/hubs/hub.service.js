@@ -150,6 +150,19 @@ async function approveHub(hubId, adminUserId) {
   return activateHub(hubId, { approvedBy: adminUserId, manual: true });
 }
 
+// Suma un vecino a un hub activo. Idempotente: si ya es miembro, devuelve el membership existente.
+async function joinActiveHub(userId, hubId) {
+  const hub = await hubRepo.findById(hubId);
+  if (!hub || hub.status !== "active") throw new Error("hub_not_active");
+
+  const existing = await hubRepo.findMembership(userId, hubId);
+  if (existing) return existing;
+
+  const membership = await hubRepo.createMembership(userId, hubId, "vecino", {});
+  eventBus.emit("hub.member_added", { hubId, userId, role: "vecino" });
+  return membership;
+}
+
 // El admin rechaza un hub pendiente con un motivo.
 // El motivo queda guardado en hub.settings para auditoría.
 async function rejectHub(hubId, reason, adminUserId) {
@@ -208,6 +221,7 @@ async function editHub(userId, hubId, { name, description }) {
 module.exports = {
   findHubsForLocation,
   foundHub,
+  joinActiveHub,
   joinPendingHub,
   joinByRefCode,
   activateHub,

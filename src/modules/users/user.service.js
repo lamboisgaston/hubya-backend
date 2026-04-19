@@ -32,8 +32,13 @@ async function setDisplayName(userId, name) {
   return userRepository.update(userId, { fullName: normalized });
 }
 
+async function findById(userId) {
+  return userRepository.findById(userId);
+}
+
 module.exports = {
   findOrCreateByPhone,
   normalizeToE164,
   setDisplayName,
+  findById,
 };

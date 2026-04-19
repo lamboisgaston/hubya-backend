@@ -4,12 +4,17 @@ const prisma = require("../../infrastructure/db");
 // Busca hubs dentro de un radio dado usando la fórmula de Haversine (distancia en la superficie de la Tierra).
 // statuses es un array, ej: ['active'] o ['active', 'pending'].
 // Devuelve los hubs ordenados de más cercano a más lejano, con distance_meters incluido.
+// Cada hub incluye memberships_count (BigInt) con el conteo de memberships activos.
+// Leerlo como: Number(hub.memberships_count)
 async function findNearby(lat, lng, radiusMeters, statuses = ["active"]) {
   return prisma.$queryRaw(Prisma.sql`
     SELECT * FROM (
       SELECT
         id, slug, name, description, status, lat, lng,
         "radiusMeters", "refCode", "createdByUserId", "createdAt",
+        (SELECT COUNT(*) FROM memberships
+          WHERE memberships."hubId" = hubs.id AND memberships.active = true
+        ) AS memberships_count,
         (6371000 * 2 * asin(sqrt(
           pow(sin(radians((lat  - ${lat})  / 2.0)), 2) +
           cos(radians(${lat})) * cos(radians(lat)) *
