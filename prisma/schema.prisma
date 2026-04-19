@@ -1,5 +1,5 @@
-// prisma/schema.prisma
-// HubYa — esquema de base de datos
+// prisma/schema.prisma — HubYa
+// Esquema base según ARCHITECTURE.md + columnas de fundadores (SPEC-hubs-fundadores.md)
 
 generator client {
   provider = "prisma-client-js"
@@ -10,269 +10,489 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ── PROVEEDORES ──────────────────────────────────────────
-model Proveedor {
-  id          Int      @id @default(autoincrement())
-  nombre      String
-  negocio     String
-  telefono    String   @unique  // número WP: 5491112345678
-  activo      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+// ── ENUMS ─────────────────────────────────────────────────
 
-  hubs               HubProveedor[]
-  productos          Producto[]
-  pedidos            Pedido[]
-  clientes           Cliente[]
-  movCaja            MovCaja[]
-  movSaldo           MovSaldo[]
-  sesiones           Sesion[]
-  solicitudesServicio SolicitudServicio[]
+enum HubStatus {
+  active
+  pending
+  rejected
+  archived
+}
+
+enum MembershipRole {
+  vecino
+  proveedor_producto
+  proveedor_servicio
+  admin_hub
+  super_admin
+}
+
+enum CategoryType {
+  product
+  service
+}
+
+enum PriceType {
+  fixed
+  per_hour
+  per_unit
+  per_project
+  on_request
+}
+
+enum MessageDirection {
+  inbound
+  outbound
+}
+
+enum MessageStatus {
+  queued
+  sent
+  delivered
+  read
+  failed
+}
+
+enum OrderStatus {
+  pending
+  confirmed
+  preparing
+  in_progress
+  delivered
+  completed
+  cancelled
+  disputed
+}
+
+enum TransactionStatus {
+  pending
+  approved
+  in_process
+  rejected
+  refunded
+  cancelled
+}
+
+enum RoundStatus {
+  draft
+  open
+  closed
+  settled
+}
+
+enum RoundTxType {
+  contribution
+  purchase
+  adjustment
+  settlement
+}
+
+enum NotificationStatus {
+  pending
+  sent
+  failed
+  cancelled
+}
+
+enum NotificationChannel {
+  whatsapp
+  email
+  push
+  sms
 }
 
 // ── HUBS ─────────────────────────────────────────────────
+// La raíz de todo. Casi todas las queries filtran por hub_id.
+// status/createdByUserId/refCode son adiciones de la spec de Hubs Fundadores.
+
 model Hub {
-  id          Int      @id @default(autoincrement())
-  nombre      String
-  barrio      String
-  provincia   String   @default("Buenos Aires")
-  lat         Float?
-  lng         Float?
-  activo      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  id              String    @id @default(uuid()) @db.Uuid
+  slug            String    @unique @db.VarChar(100)
+  name            String    @db.VarChar(200)
+  description     String?   @db.Text
+  address         String?   @db.Text
+  lat             Float?
+  lng             Float?
+  radiusMeters    Int       @default(1000)
+  timezone        String    @default("America/Argentina/Buenos_Aires") @db.VarChar(50)
+  settings        Json      @default("{}")
+  status          HubStatus @default(active)
+  createdByUserId String?   @db.Uuid
+  refCode         String?   @unique @db.VarChar(20)
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt       DateTime? @db.Timestamptz(6)
 
-  proveedores HubProveedor[]
-  clientes    Cliente[]
-  pedidos     Pedido[]
-  vecinos     Vecino[]
-  solicitudes SolicitudServicio[]
-  votos       Voto[]
+  createdByUser    User?             @relation("HubFounder", fields: [createdByUserId], references: [id])
+  memberships      Membership[]
+  categories       Category[]
+  offerings        Offering[]
+  conversations    Conversation[]
+  orders           Order[]
+  transactions     Transaction[]
+  collectiveRounds CollectiveRound[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  termsAcceptances TermsAcceptance[]
+
+  @@map("hubs")
 }
 
-model HubProveedor {
-  id          Int      @id @default(autoincrement())
-  hubId       Int
-  proveedorId Int
-  activo      Boolean  @default(true)
-  diaReparto  String?  // Lunes, Martes, etc.
-  createdAt   DateTime @default(now())
+// ── USERS ─────────────────────────────────────────────────
+// Una persona, identificada por su número de WhatsApp.
+// El mismo usuario puede tener múltiples roles en múltiples hubs (via memberships).
 
-  hub         Hub       @relation(fields:[hubId], references:[id])
-  proveedor   Proveedor @relation(fields:[proveedorId], references:[id])
+model User {
+  id                String    @id @default(uuid()) @db.Uuid
+  phoneNumber       String    @unique @db.VarChar(20)
+  fullName          String?   @db.VarChar(200)
+  email             String?   @db.VarChar(200)
+  preferredLanguage String    @default("es") @db.Char(2)
+  metadata          Json      @default("{}")
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt         DateTime? @db.Timestamptz(6)
 
-  @@unique([hubId, proveedorId])
+  memberships       Membership[]
+  conversations     Conversation[]
+  orders            Order[]
+  transactions      Transaction[]
+  termsAcceptances  TermsAcceptance[]
+  roundParticipants RoundParticipant[]
+  roundMovements    RoundMovement[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  foundedHubs       Hub[]             @relation("HubFounder")
+
+  @@map("users")
 }
 
-// ── CATEGORÍAS Y PRODUCTOS ───────────────────────────────
-model Categoria {
-  id          Int      @id @default(autoincrement())
-  nombre      String
-  emoji       String   @default("📦")
-  proveedorId Int
-  orden       Int      @default(0)
+// ── MEMBERSHIPS ───────────────────────────────────────────
+// El rol de un usuario en un hub. Un usuario puede tener varios roles en varios hubs.
+// metadata.founder = true indica que este vecino fundó el hub.
+// metadata.interested_in_pending = true indica que se sumó a un hub pendiente.
 
-  subcategorias Subcategoria[]
-  productos     Producto[]
+model Membership {
+  id        String         @id @default(uuid()) @db.Uuid
+  userId    String         @db.Uuid
+  hubId     String         @db.Uuid
+  role      MembershipRole
+  active    Boolean        @default(true)
+  joinedAt  DateTime       @default(now()) @db.Timestamptz(6)
+  metadata  Json           @default("{}")
+  createdAt DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime       @updatedAt @db.Timestamptz(6)
+
+  user     User      @relation(fields: [userId], references: [id])
+  hub      Hub       @relation(fields: [hubId], references: [id])
+  provider Provider?
+
+  @@unique([userId, hubId, role])
+  @@map("memberships")
 }
 
-model Subcategoria {
-  id          Int      @id @default(autoincrement())
-  nombre      String
-  categoriaId Int
-  orden       Int      @default(0)
+// ── TERMS ACCEPTANCES ─────────────────────────────────────
 
-  categoria   Categoria  @relation(fields:[categoriaId], references:[id])
-  productos   Producto[]
+model TermsAcceptance {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  hubId        String?  @db.Uuid
+  termsVersion String   @db.VarChar(20)
+  acceptedAt   DateTime @default(now()) @db.Timestamptz(6)
+  acceptedIp   String?  @db.VarChar(45)
+  acceptedVia  String?  @db.VarChar(20)
+  metadata     Json     @default("{}")
+
+  user User  @relation(fields: [userId], references: [id])
+  hub  Hub?  @relation(fields: [hubId], references: [id])
+
+  @@map("terms_acceptances")
 }
 
-model Producto {
-  id             Int      @id @default(autoincrement())
-  nombre         String
-  descripcion    String   @default("")
-  categoriaId    Int?
-  subcategoriaId Int?
-  proveedorId    Int
-  activo         Boolean  @default(true)
-  precioBase     Int      // en centavos para evitar decimales
-  createdAt      DateTime @default(now())
+// ── CATEGORIES ────────────────────────────────────────────
 
-  categoria    Categoria?    @relation(fields:[categoriaId], references:[id])
-  subcategoria Subcategoria? @relation(fields:[subcategoriaId], references:[id])
-  proveedor    Proveedor     @relation(fields:[proveedorId], references:[id])
-  descuentos   Descuento[]
-  itemsPedido  ItemPedido[]
-  itemsVenta   ItemVenta[]
+model Category {
+  id           String       @id @default(uuid()) @db.Uuid
+  hubId        String?      @db.Uuid
+  type         CategoryType
+  parentId     String?      @db.Uuid
+  slug         String       @db.VarChar(100)
+  name         String       @db.VarChar(200)
+  description  String?      @db.Text
+  icon         String?      @db.VarChar(100)
+  displayOrder Int          @default(0)
+  active       Boolean      @default(true)
+  createdAt    DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(6)
+
+  hub       Hub?       @relation(fields: [hubId], references: [id])
+  parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryHierarchy")
+  offerings Offering[]
+
+  @@map("categories")
 }
 
-model Descuento {
-  id         Int @id @default(autoincrement())
-  productoId Int
-  desde      Int  // cantidad mínima
-  hasta      Int  // cantidad máxima (999 = sin límite)
-  porcentaje Int  // ej: 7 = 7%
+// ── PROVIDERS ─────────────────────────────────────────────
+// El perfil comercial de un usuario con rol proveedor_* en un hub.
 
-  producto   Producto @relation(fields:[productoId], references:[id])
+model Provider {
+  id            String    @id @default(uuid()) @db.Uuid
+  membershipId  String    @unique @db.Uuid
+  businessName  String    @db.VarChar(200)
+  description   String?   @db.Text
+  logoUrl       String?   @db.Text
+  phoneBusiness String?   @db.VarChar(20)
+  verified      Boolean   @default(false)
+  verifiedAt    DateTime? @db.Timestamptz(6)
+  ratingAvg     Decimal?  @db.Decimal(3, 2)
+  ratingCount   Int       @default(0)
+  active        Boolean   @default(true)
+  metadata      Json      @default("{}")
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
+
+  membership Membership @relation(fields: [membershipId], references: [id])
+  offerings  Offering[]
+  orders     Order[]
+
+  @@map("providers")
 }
 
-// ── CLIENTES ─────────────────────────────────────────────
-model Cliente {
-  id          Int      @id @default(autoincrement())
-  nombre      String
-  telefono    String              // número WP
-  hubId       Int?
-  proveedorId Int
-  saldo       Int      @default(0) // negativo = debe
-  limite      Int      @default(-10000) // límite de crédito (negativo)
-  activo      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+// ── OFFERINGS ─────────────────────────────────────────────
+// Productos o servicios que un proveedor ofrece dentro de un hub.
 
-  hub         Hub?       @relation(fields:[hubId], references:[id])
-  proveedor   Proveedor  @relation(fields:[proveedorId], references:[id])
-  pedidos     Pedido[]
-  ventas      Venta[]
+model Offering {
+  id          String       @id @default(uuid()) @db.Uuid
+  providerId  String       @db.Uuid
+  hubId       String       @db.Uuid
+  categoryId  String?      @db.Uuid
+  type        CategoryType
+  name        String       @db.VarChar(300)
+  description String?      @db.Text
+  price       Decimal?     @db.Decimal(12, 2)
+  priceType   PriceType    @default(fixed)
+  currency    String       @default("ARS") @db.Char(3)
+  available   Boolean      @default(true)
+  stock       Int?
+  images      Json         @default("[]")
+  attributes  Json         @default("{}")
+  createdAt   DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(6)
+  deletedAt   DateTime?    @db.Timestamptz(6)
 
-  @@unique([telefono, proveedorId])
+  provider   Provider    @relation(fields: [providerId], references: [id])
+  hub        Hub         @relation(fields: [hubId], references: [id])
+  category   Category?   @relation(fields: [categoryId], references: [id])
+  orderItems OrderItem[]
+
+  @@map("offerings")
 }
 
-// ── PEDIDOS (rondas HubYa) ───────────────────────────────
-model Pedido {
-  id          Int      @id @default(autoincrement())
-  clienteId   Int
-  proveedorId Int
-  hubId       Int?
-  estado      String   @default("aceptacion") // aceptacion | aceptado | entregado | rechazado
-  horario     String?  // Mediodía | Tarde | Noche
-  total       Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+// ── CONVERSATIONS ─────────────────────────────────────────
+// Estado del flujo del bot. Nunca en memoria — siempre en la base (Regla 1).
 
-  cliente     Cliente   @relation(fields:[clienteId], references:[id])
-  proveedor   Proveedor @relation(fields:[proveedorId], references:[id])
-  hub         Hub?      @relation(fields:[hubId], references:[id])
-  items       ItemPedido[]
+model Conversation {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  hubId          String?   @db.Uuid
+  currentFlow    String?   @db.VarChar(100)
+  currentStep    String?   @db.VarChar(100)
+  context        Json      @default("{}")
+  lastInboundAt  DateTime? @db.Timestamptz(6)
+  lastOutboundAt DateTime? @db.Timestamptz(6)
+  expiresAt      DateTime? @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(6)
+
+  user     User      @relation(fields: [userId], references: [id])
+  hub      Hub?      @relation(fields: [hubId], references: [id])
+  messages Message[]
+
+  @@map("conversations")
 }
 
-model ItemPedido {
-  id         Int @id @default(autoincrement())
-  pedidoId   Int
-  productoId Int
-  cantidad   Int
-  precioUnit Int  // precio al momento del pedido
+// ── MESSAGES ──────────────────────────────────────────────
+// Historial completo de WhatsApps. metaMessageId garantiza idempotencia.
 
-  pedido     Pedido   @relation(fields:[pedidoId], references:[id])
-  producto   Producto @relation(fields:[productoId], references:[id])
+model Message {
+  id             String           @id @default(uuid()) @db.Uuid
+  conversationId String           @db.Uuid
+  direction      MessageDirection
+  metaMessageId  String?          @unique @db.VarChar(200)
+  type           String?          @db.VarChar(50)
+  content        String?          @db.Text
+  payload        Json?
+  status         MessageStatus    @default(queued)
+  error          String?          @db.Text
+  createdAt      DateTime         @default(now()) @db.Timestamptz(6)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@map("messages")
 }
 
-// ── VENTAS AL PÚBLICO ────────────────────────────────────
-model Venta {
-  id          Int      @id @default(autoincrement())
-  clienteId   Int?
-  telefono    String?  // si no es cliente registrado
-  proveedorId Int
-  medio       String   // efectivo | banco
-  total       Int
-  cobrado     Int
-  createdAt   DateTime @default(now())
+// ── ORDERS ────────────────────────────────────────────────
 
-  cliente     Cliente?   @relation(fields:[clienteId], references:[id])
-  items       ItemVenta[]
+model Order {
+  id          String      @id @default(uuid()) @db.Uuid
+  orderNumber String      @unique @db.VarChar(20)
+  hubId       String      @db.Uuid
+  buyerUserId String      @db.Uuid
+  providerId  String      @db.Uuid
+  status      OrderStatus @default(pending)
+  subtotal    Decimal     @db.Decimal(12, 2)
+  fee         Decimal     @default(0) @db.Decimal(12, 2)
+  total       Decimal     @db.Decimal(12, 2)
+  currency    String      @default("ARS") @db.Char(3)
+  notes       String?     @db.Text
+  metadata    Json        @default("{}")
+  createdAt   DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(6)
+
+  hub          Hub          @relation(fields: [hubId], references: [id])
+  buyerUser    User         @relation(fields: [buyerUserId], references: [id])
+  provider     Provider     @relation(fields: [providerId], references: [id])
+  items        OrderItem[]
+  transactions Transaction[]
+
+  @@map("orders")
 }
 
-model ItemVenta {
-  id         Int @id @default(autoincrement())
-  ventaId    Int
-  productoId Int
-  cantidad   Int
-  precioUnit Int
+// ── ORDER ITEMS ───────────────────────────────────────────
+// nameSnapshot y priceSnapshot congelan el nombre y precio al momento de la compra.
 
-  venta    Venta    @relation(fields:[ventaId], references:[id])
-  producto Producto @relation(fields:[productoId], references:[id])
+model OrderItem {
+  id            String  @id @default(uuid()) @db.Uuid
+  orderId       String  @db.Uuid
+  offeringId    String  @db.Uuid
+  nameSnapshot  String  @db.VarChar(300)
+  priceSnapshot Decimal @db.Decimal(12, 2)
+  quantity      Int     @default(1)
+  subtotal      Decimal @db.Decimal(12, 2)
+  metadata      Json    @default("{}")
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  offering Offering @relation(fields: [offeringId], references: [id])
+
+  @@map("order_items")
 }
 
-// ── CAJA ─────────────────────────────────────────────────
-model MovCaja {
-  id          Int      @id @default(autoincrement())
-  proveedorId Int
-  tipo        String   // cobro | pago_proveedor | gasto | venta
-  descripcion String
-  monto       Int      // positivo = entrada, negativo = salida
-  medio       String   // efectivo | banco
-  tieneFactura Boolean @default(false)
-  refId       Int?     // id del pedido/venta relacionado
-  refTipo     String?  // pedido | venta
-  createdAt   DateTime @default(now())
+// ── TRANSACTIONS ──────────────────────────────────────────
 
-  proveedor   Proveedor @relation(fields:[proveedorId], references:[id])
+model Transaction {
+  id                   String            @id @default(uuid()) @db.Uuid
+  orderId              String?           @db.Uuid
+  userId               String            @db.Uuid
+  hubId                String            @db.Uuid
+  amount               Decimal           @db.Decimal(12, 2)
+  currency             String            @default("ARS") @db.Char(3)
+  status               TransactionStatus @default(pending)
+  paymentMethod        String?           @db.VarChar(50)
+  provider             String            @default("mercadopago") @db.VarChar(50)
+  providerPaymentId    String?           @unique @db.VarChar(200)
+  providerPreferenceId String?           @db.VarChar(200)
+  rawResponse          Json?
+  createdAt            DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime          @updatedAt @db.Timestamptz(6)
+
+  order Order? @relation(fields: [orderId], references: [id])
+  user  User   @relation(fields: [userId], references: [id])
+  hub   Hub    @relation(fields: [hubId], references: [id])
+
+  @@map("transactions")
 }
 
-// ── SALDO (debe/haber) ────────────────────────────────────
-model MovSaldo {
-  id          Int      @id @default(autoincrement())
-  proveedorId Int
-  lado        String   // H = haber | D = debe
-  descripcion String
-  monto       Int      // siempre positivo, el lado indica dirección
-  refId       Int?
-  refTipo     String?
-  createdAt   DateTime @default(now())
+// ── COLLECTIVE ROUNDS ─────────────────────────────────────
 
-  proveedor   Proveedor @relation(fields:[proveedorId], references:[id])
+model CollectiveRound {
+  id          String      @id @default(uuid()) @db.Uuid
+  hubId       String      @db.Uuid
+  name        String      @db.VarChar(200)
+  description String?     @db.Text
+  status      RoundStatus @default(draft)
+  startsAt    DateTime?   @db.Timestamptz(6)
+  endsAt      DateTime?   @db.Timestamptz(6)
+  metadata    Json        @default("{}")
+  createdAt   DateTime    @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(6)
+
+  hub          Hub               @relation(fields: [hubId], references: [id])
+  participants RoundParticipant[]
+  movements    RoundMovement[]
+
+  @@map("collective_rounds")
 }
 
-// ── SESIONES DE CONVERSACIÓN WP ──────────────────────────
-model Sesion {
-  id          Int      @id @default(autoincrement())
-  telefono    String   @unique  // número WP del usuario
-  tipo        String   // proveedor | vecino
-  proveedorId Int?
-  step        String   @default("start")   // paso actual del flujo
-  ctx         Json     @default("{}")       // contexto del flujo
-  updatedAt   DateTime @updatedAt
+model RoundParticipant {
+  id       String   @id @default(uuid()) @db.Uuid
+  roundId  String   @db.Uuid
+  userId   String   @db.Uuid
+  joinedAt DateTime @default(now()) @db.Timestamptz(6)
 
-  proveedor   Proveedor? @relation(fields:[proveedorId], references:[id])
+  round CollectiveRound @relation(fields: [roundId], references: [id])
+  user  User            @relation(fields: [userId], references: [id])
+
+  @@unique([roundId, userId])
+  @@map("round_participants")
 }
 
-// ── VECINOS (identidad del usuario barrial) ───────────────
-model Vecino {
-  id        Int      @id @default(autoincrement())
-  nombre    String
-  telefono  String   @unique
-  hubId     Int?
-  lat       Float?
-  lng       Float?
-  activo    Boolean  @default(true)
-  createdAt DateTime @default(now())
+model RoundMovement {
+  id               String      @id @default(uuid()) @db.Uuid
+  roundId          String      @db.Uuid
+  userId           String      @db.Uuid
+  type             RoundTxType
+  amount           Decimal     @db.Decimal(12, 2)
+  description      String?     @db.Text
+  referenceOrderId String?     @db.Uuid
+  createdAt        DateTime    @default(now()) @db.Timestamptz(6)
 
-  hub       Hub? @relation(fields:[hubId], references:[id])
+  round CollectiveRound @relation(fields: [roundId], references: [id])
+  user  User            @relation(fields: [userId], references: [id])
+
+  @@map("round_movements")
 }
 
-// ── SOLICITUDES DE SERVICIO (JardinerosYA / FumigadoresYA) ─
-model SolicitudServicio {
-  id             Int      @id @default(autoincrement())
-  tipo           String   // jardineros | fumigadores
-  telefonoVecino String
-  nombreVecino   String
-  descripcion    String?
-  hubId          Int?
-  proveedorId    Int?     // asignado al aceptar
-  estado         String   @default("pendiente") // pendiente | asignado | completado | cancelado
-  lat            Float?
-  lng            Float?
-  createdAt      DateTime @default(now())
+// ── NOTIFICATIONS ─────────────────────────────────────────
+// Cola persistente. El worker de BullMQ las consume; nunca se envían sincrónicamente.
 
-  hub       Hub?       @relation(fields:[hubId], references:[id])
-  proveedor Proveedor? @relation(fields:[proveedorId], references:[id])
+model Notification {
+  id           String              @id @default(uuid()) @db.Uuid
+  userId       String              @db.Uuid
+  hubId        String?             @db.Uuid
+  channel      NotificationChannel
+  template     String              @db.VarChar(100)
+  payload      Json
+  scheduledFor DateTime            @default(now()) @db.Timestamptz(6)
+  sentAt       DateTime?           @db.Timestamptz(6)
+  status       NotificationStatus  @default(pending)
+  attempts     Int                 @default(0)
+  lastError    String?             @db.Text
+  createdAt    DateTime            @default(now()) @db.Timestamptz(6)
+
+  user User  @relation(fields: [userId], references: [id])
+  hub  Hub?  @relation(fields: [hubId], references: [id])
+
+  @@map("notifications")
 }
 
-// ── VOTACIONES DE HUB ─────────────────────────────────────
-model Voto {
-  id        Int      @id @default(autoincrement())
-  hubId     Int
-  telefono  String
-  propuesta String
-  opcion    String   // si | no | abstencion
-  createdAt DateTime @default(now())
+// ── AUDIT LOG ─────────────────────────────────────────────
 
-  hub Hub @relation(fields:[hubId], references:[id])
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @db.Uuid
+  hubId      String?  @db.Uuid
+  action     String   @db.VarChar(100)
+  entityType String?  @db.VarChar(50)
+  entityId   String?  @db.Uuid
+  changes    Json?
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.Text
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
 
-  @@unique([hubId, telefono, propuesta])
+  user User? @relation(fields: [userId], references: [id])
+  hub  Hub?  @relation(fields: [hubId], references: [id])
+
+  @@map("audit_logs")
 }

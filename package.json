@@ -6,9 +6,9 @@
   "scripts": {
     "start":   "node src/index.js",
     "dev":     "nodemon src/index.js",
-    "db:push": "npx prisma db push",
-    "db:seed": "node scripts/seed.js",
-    "db:studio":"npx prisma studio"
+    "db:migrate": "npx prisma migrate dev",
+    "db:seed":    "node scripts/seed.js",
+    "db:studio":  "npx prisma studio"
   },
   "dependencies": {
     "@prisma/client": "^5.10.0",
