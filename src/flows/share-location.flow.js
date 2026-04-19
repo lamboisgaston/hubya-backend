@@ -83,8 +83,9 @@ const steps = {
             type: "buttons",
             text: "¿Qué desea hacer?",
             buttons: [
-              { id: "join_pending", title: "Unirme como interesado" },
-              { id: "found_own",    title: "Fundar mi propio hub"   },
+              { id: "join_pending",  title: "Unirme como interesado" },
+              { id: "found_own",     title: "Fundar mi propio hub"   },
+              { id: "operate_solo",  title: "Operar solo"            },
             ],
           },
         ],
@@ -111,14 +112,62 @@ const steps = {
           type: "buttons",
           text: "¿Qué desea hacer?",
           buttons: [
-            { id: "found_hub", title: "Sí, deseo fundarlo" },
-            { id: "not_now",   title: "No por ahora"       },
+            { id: "found_hub",    title: "Sí, deseo fundarlo" },
+            { id: "operate_solo", title: "Operar solo"        },
+            { id: "not_now",      title: "No por ahora"       },
           ],
         },
       ],
       contextPatch: { lat, lng },
-      nextFlow: "found_hub",
-      nextStep: "start",
+      nextStep: "await_no_hub_choice",
+    };
+  },
+  // Espera la elección del usuario en Rama C (sin hub cercano).
+  // Lee lat/lng del context porque el mensaje entrante es un buttonId, no una ubicación.
+  await_no_hub_choice: async ({ message, user, conversation }) => {
+    const { lat, lng } = conversation.context ?? {};
+
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      return {
+        messages: [{ type: "text", text: "Lo sentimos, ocurrió un error con su ubicación. Por favor intente nuevamente compartiendo su ubicación." }],
+        done: true,
+      };
+    }
+
+    const buttonId = message.buttonId;
+
+    if (buttonId === "found_hub") {
+      return { nextFlow: "found_hub", nextStep: "start" };
+    }
+
+    if (buttonId === "operate_solo") {
+      await userService.markAsIndividual(user.id, lat, lng);
+      return {
+        messages: [{ type: "text", text: "Perfecto. Lo hemos registrado como vecino individual. Podrá comprar productos y contratar servicios. Le avisaremos si aparece un hub en su zona." }],
+        done: true,
+      };
+    }
+
+    if (buttonId === "not_now") {
+      return {
+        messages: [{ type: "text", text: "Entendido. Puede volver a escribirnos cuando desee." }],
+        done: true,
+      };
+    }
+
+    // Fallback: respuesta inesperada, reenviar opciones.
+    return {
+      messages: [
+        {
+          type: "buttons",
+          text: "Por favor elija una de las opciones:",
+          buttons: [
+            { id: "found_hub",    title: "Sí, deseo fundarlo" },
+            { id: "operate_solo", title: "Operar solo"        },
+            { id: "not_now",      title: "No por ahora"       },
+          ],
+        },
+      ],
     };
   },
 };
