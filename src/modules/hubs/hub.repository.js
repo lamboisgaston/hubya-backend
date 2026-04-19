@@ -93,6 +93,15 @@ function createMembership(userId, hubId, role, metadata = {}) {
   });
 }
 
+// Devuelve todas las memberships activas de un usuario con el hub incluido.
+// Se usa en userService.getCurrentState para derivar el estado del vecino.
+function findActiveMembershipsWithHub(userId) {
+  return prisma.membership.findMany({
+    where: { userId, active: true },
+    include: { hub: { select: { id: true, name: true, status: true } } },
+  });
+}
+
 module.exports = {
   findNearby,
   findByRefCode,
@@ -103,4 +112,5 @@ module.exports = {
   countMembers,
   findMembership,
   createMembership,
+  findActiveMembershipsWithHub,
 };
