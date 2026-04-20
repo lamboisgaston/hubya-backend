@@ -57,10 +57,20 @@ async function resetIfExpired(conversationId, maxInactivityMinutes) {
   });
 }
 
+async function touchInbound(conversationId) {
+  return conversationRepository.update(conversationId, { lastInboundAt: new Date() });
+}
+
+async function touchOutbound(conversationId) {
+  return conversationRepository.update(conversationId, { lastOutboundAt: new Date() });
+}
+
 module.exports = {
   getOrStartConversation,
   setFlow,
   setStep,
   completeConversation,
   resetIfExpired,
+  touchInbound,
+  touchOutbound,
 };

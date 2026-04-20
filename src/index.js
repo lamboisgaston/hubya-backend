@@ -3,7 +3,11 @@ require("dotenv").config();
 const express = require("express");
 const app = express();
 
-app.use(express.json());
+// El callback verify captura el raw body para que el webhook pueda
+// verificar la firma HMAC-SHA256 que Meta adjunta en x-hub-signature-256.
+app.use(express.json({
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
 
 // ── Rutas ──────────────────────────────────────────────
 app.use("/webhook",  require("./routes/webhook"));
