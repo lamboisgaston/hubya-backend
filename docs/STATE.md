@@ -4,15 +4,24 @@ Este documento se actualiza al final de cada sesión de trabajo. Al iniciar la p
 
 ---
 
-**Última actualización:** 2026-04-19 (noche)
-**Último commit:** `de67c65` — feat(pr3c2e): join-pending-or-found flow con 3 ramas según buttonId
+**Última actualización:** 2026-04-20 (noche)
+**Último commit:** `docs: actualizar STATE.md y DECISIONS.md al cerrar PR 3c.3`
 **Branch:** `main` (siempre trabajamos en main por ahora)
 
 ---
 
 ## En qué PR estamos
 
-**PR 3c.3** — Conectar el webhook al flow engine.
+**PR 4** — Workers + Redis + BullMQ + notificaciones asíncronas.
+
+### PR 3c.3 — COMPLETO
+
+Sub-pasos del PR 3c.3:
+
+- [x] **3c.3.a** — `src/infrastructure/meta.normalizer.js`: normaliza el payload de Meta al formato interno `{ type, text, location, buttonId, from, metaMessageId }`. Commit `a84516e`.
+- [x] **3c.3.b** — `src/infrastructure/ref-code.detector.js`: detecta `hub_XXXXXX` en mensajes entrantes y resuelve la adhesión al hub antes de entrar al flow engine. Commit `50fa610`.
+- [x] **3c.3.c** — `src/routes/webhook.js`: webhook conectado al flow engine con idempotencia por INSERT atómico, verificación de firma HMAC, detección de refCode, arranque de onboarding, adaptador flow→wpService y registro de mensajes en DB. Commit `be1ca92`.
+- [x] **3c.3.d** — Documentación actualizada. Este commit.
 
 ### PR 3c.2 — COMPLETO
 
@@ -29,36 +38,67 @@ Sub-pasos del PR 3c.2:
 
 ## Próximo paso inmediato
 
-**PR 3c.3** — Conectar el webhook (`src/index.js`) al flow engine.
+**PR 4** — Workers + Redis + BullMQ + notificaciones asíncronas.
 
-Contexto necesario:
-- El webhook actual no usa el motor de flows aún; sigue con el código legacy.
-- Hay que refactorizarlo para: (a) recibir mensajes de Meta, (b) normalizarlos al formato que espera el flow engine (`{ type, text, lat, lng, buttonId }`), (c) resolver usuario y conversación con los services, (d) llamar a `flow.engine.handle()`, (e) tomar los mensajes devueltos y enviarlos con `wpService`.
-- Además: detectar `ref_code` en mensajes entrantes y llamar a `hubService.joinByRefCode` ANTES de entrar al flow engine.
-- Este es el PR más delicado porque conecta WhatsApp con los flows. Hacerlo con paciencia, plan en prosa primero, commit chico.
+Qué incluye:
+- Agregar Redis como addon en Railway.
+- Instalar BullMQ y crear la cola `notifications`.
+- Separar el servicio en dos en Railway: `web` (bot actual) y `worker` (consumidor de cola).
+- Reemplazar el `setImmediate` del webhook por un enqueue real en BullMQ.
+- Worker de notificaciones: cuando se emite `hub.activated` o `hub.created_pending`, notificar a los individuales cercanos.
+- Implementar `findNearbyIndividuals` (hoy es un stub que devuelve array vacío).
 
 ---
 
-## Lo que ya funciona conceptualmente (no probado end-to-end)
+## Lo que ya funciona end-to-end
+
+Con el PR 3c.3 completo, el pipeline completo del bot está operativo:
+
+- Webhook recibe mensajes de Meta y responde 200 inmediatamente.
+- Verificación de firma HMAC-SHA256 con `META_APP_SECRET`.
+- Idempotencia: mismo `wamid` nunca se procesa dos veces.
+- Normalización de payloads: texto, ubicación, botones, listas, tipos no soportados.
+- Detección de `hub_XXXXXX` en mensajes y adhesión al hub antes del flow engine.
+- Resolución y creación de usuario por número de teléfono (E.164).
+- Resolución de conversación con reset por inactividad (60 minutos).
+- Onboarding automático para usuarios sin flow activo.
+- Flow engine ejecutando: onboarding, share_location, found_hub, join_pending_or_found.
+- Respuestas enviadas por `wpService` (texto, botones, listas).
+- Historial de mensajes inbound/outbound guardado en DB.
+
+## Lo que funciona conceptualmente (no probado end-to-end desde WhatsApp real)
 
 - Schema de DB completo con hubs, users, memberships, conversations, etc.
 - Seed con datos de prueba (hub activo Palermo Soho, hub pendiente Salta Capital Centro, usuarios de prueba).
 - Módulo de hubs (repo + service) con findHubsForLocation, foundHub, joinActiveHub, joinPendingHub, joinByRefCode, activateHub, approveHub, rejectHub, editHub.
-- Módulo de usuarios (repo + service) con findOrCreateByPhone, setDisplayName, findById, getCurrentState, updateLastLocation, markAsIndividual, findNearbyIndividuals (stub).
-- Módulo de conversaciones (repo + service) con getOrStartConversation, setFlow, setStep, completeConversation, resetIfExpired.
-- Motor de flows genérico (`flow.engine.js`) con register + handle + _applyTransition.
-- Flow onboarding (pide nombre, lo guarda, salta a share_location).
-- Flow share-location (4 ramas + step await_no_hub_choice para la rama C).
-- Flow de fundar hub (`found-hub.flow.js`): nombre, descripción mínimo 10 chars, link wa.me + código refCode, manejo de errores `YA_TIENE_HUB_PENDIENTE` y `HUB_CERCANO_EXISTENTE`.
-- Flow de decisión post-hub-pendiente (`join-pending-or-found.flow.js`): 3 ramas según buttonId (join_pending, found_own, operate_solo) + fallback.
+- Módulo de usuarios (repo + service) completo.
+- Módulo de conversaciones (repo + service) completo.
 
-## Lo que falta para que el bot funcione end-to-end
+## Lo que falta para que el bot esté en producción real
 
 | Pendiente | Qué es | PR |
 |-----------|--------|----|
-| Actualizar el webhook | src/index.js para que use el flow engine + detectar refCode en mensajes | 3c.3 |
-| Workers + Redis + BullMQ | Notificaciones asíncronas + worker de individuales cercanos | PR 4 |
+| Workers + Redis + BullMQ | Reemplazar setImmediate por cola real | PR 4 |
+| findNearbyIndividuals | Implementar la búsqueda geográfica de individuales | PR 4 |
 | Comandos de admin | /admin hubs pendientes, /admin aprobar, etc. | PR 5 |
+| Tests de flujos críticos | Especialmente pagos, activación de hubs | PR 6 |
+
+---
+
+## Testing end-to-end desde WhatsApp real
+
+**Pendiente.** Los 10 casos de prueba manual están documentados en el commit `be1ca92` (sección G del plan de 3c.3.c). En resumen:
+
+1. Onboarding básico (texto → pide nombre → pide ubicación).
+2. Ubicación cerca de hub activo → suma al vecino directamente.
+3. Ubicación cerca de hub pendiente → muestra 3 opciones.
+4. Ubicación sin hubs cercanos → ofrece fundar o individual.
+5. Flow de fundar hub end-to-end → recibe refCode y link.
+6. Mandar `hub_XXXXXXXX` → adhesión sin onboarding de ubicación.
+7. Mandar imagen o audio → respuesta de tipo no soportado.
+8. Inactividad > 60 min → reset del flow al siguiente mensaje.
+9. Webhooks de status (delivery/read) → ignorados sin procesamiento.
+10. Logs de Railway durante las pruebas para diagnóstico.
 
 ---
 
@@ -81,9 +121,10 @@ En el servicio `hubya-backend`:
 - `META_ACCESS_TOKEN` — System User Token permanente (no temporal).
 - `META_API_VERSION` — versión actual de la API de WhatsApp.
 - `META_PHONE_NUMBER_ID` — ID del número.
-- `META_PHONE_NUMBER` — **pendiente agregar**, para armar links wa.me en 3c.2.d.
+- `META_PHONE_NUMBER` — **pendiente agregar**, para armar links wa.me en found-hub.flow.
 - `META_WABA_ID` — WhatsApp Business Account ID.
 - `META_WEBHOOK_VERIFY_TOKEN` — token del webhook.
+- `META_APP_SECRET` — para verificar firma HMAC de webhooks entrantes. **Pendiente agregar.**
 
 ---
 

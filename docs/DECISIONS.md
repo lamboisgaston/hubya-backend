@@ -4,6 +4,73 @@ Este archivo es un changelog de las decisiones importantes de producto, arquitec
 
 ---
 
+## 2026-04-20 — Mensajes de error del flow engine bypassean el adaptador
+
+**Contexto:** Si el flow engine lanza una excepción, el webhook debe mandar un mensaje genérico de error al usuario. Ese mensaje podría pasar por el adaptador `adaptMessage()` que convierte formato inglés a español.
+
+**Decisión:** El mensaje de error se construye directamente en formato `wpService` (`{ tipo: "texto", texto: "..." }`), sin pasar por `adaptMessage`.
+
+**Razón:** Si el adaptador tiene un bug, el mensaje de error igual llega al usuario. El camino de error tiene que ser lo más corto y simple posible.
+
+**Implementación:** `src/routes/webhook.js`, paso 9 del pipeline y función `sendErrorMessage`.
+
+---
+
+## 2026-04-20 — Adaptador flow → wpService inline en el webhook
+
+**Contexto:** Los flows devuelven mensajes en formato inglés (`{ type, text, buttons[{ id, title }] }`). `wpService` espera formato español (`{ tipo, texto, botones[{ id, label }] }`). Hay tres diferencias: `type → tipo`, `text → texto`, `title → label`.
+
+**Decisión:** Función helper privada `adaptMessage()` dentro de `src/routes/webhook.js`. No es un módulo separado.
+
+**Razón:** YAGNI. Solo el webhook la usa hoy. Si en PR 4 un worker también necesita convertir mensajes al enviar notificaciones, se extrae a `src/infrastructure/message.adapter.js` en ese momento. Extraer antes sería optimizar para un caso hipotético.
+
+---
+
+## 2026-04-20 — Procesamiento asíncrono con setImmediate hasta PR 4
+
+**Contexto:** Meta exige una respuesta HTTP en menos de 20 segundos o reintenta el webhook. El procesamiento (queries a DB, llamadas a Meta API) puede tomar varios segundos.
+
+**Alternativas evaluadas:**
+- (a) Procesamiento síncrono bloqueante — arriesga timeouts de Meta si DB o wpService son lentos.
+- (b) Enqueue en BullMQ — la solución correcta, pero requiere Redis (PR 4).
+- (c) `setImmediate` — posterga el procesamiento al siguiente tick del event loop, liberando la respuesta.
+
+**Decisión:** (c) `setImmediate`. El webhook responde 200 inmediatamente y el procesamiento real ocurre después.
+
+**Tradeoff aceptado:** si el procesamiento falla después de haber respondido 200, Meta no lo sabe y no reintenta. El usuario no recibe respuesta. En PR 4 esto se resuelve correctamente con la cola: si el job falla, BullMQ puede reintentar con backoff exponencial.
+
+**Implementación:** `src/routes/webhook.js`, handler del POST.
+
+---
+
+## 2026-04-20 — Idempotencia por INSERT atómico con constraint de DB
+
+**Contexto:** Meta puede reintentar el mismo webhook varias veces. Si el bot procesa el mismo mensaje dos veces, el usuario recibe respuestas duplicadas y el estado de la conversación puede corromperse.
+
+**Alternativas evaluadas:**
+- (a) `findUnique` al principio, `INSERT` al final — tiene una ventana de race condition: dos requests paralelos del mismo `wamid` pueden pasar el check simultáneamente antes de que alguno haga el INSERT.
+- (b) `INSERT` al principio del pipeline con `metaMessageId @unique` como lock — el constraint de PostgreSQL es atómico. Solo un INSERT puede ganar; el segundo lanza `P2002`.
+
+**Decisión:** (b). El INSERT ocurre en el Paso 4, después de resolver usuario y conversación (necesarios para tener `conversationId`, que es non-nullable en la tabla `messages`). Si el INSERT lanza `P2002` → ya procesado, salir. Cualquier otro error de DB → loguear y salir conservadoramente.
+
+**Limitación pendiente:** si `metaMessageId` viene vacío en el payload (edge case con payloads malformados), Postgres permite múltiples NULL en campos `@unique`, rompiendo la idempotencia. Fix aplicado: se descarta el mensaje antes del INSERT si `metaMessageId` está vacío.
+
+**Implementación:** `src/routes/webhook.js`, Paso 4 del pipeline.
+
+---
+
+## 2026-04-20 — REF_CODE_REGEX con longitud mínima de 6 caracteres
+
+**Contexto:** Los refCodes se generan como `hub_` + 8 chars base62 (`[0-9A-Za-z]`). El detector usa una regex para encontrar el patrón en el texto libre del mensaje.
+
+**Decisión:** `/\bhub_[A-Za-z0-9]{6,}\b/`. Mínimo de 6 caracteres alfanuméricos después de `hub_`. Sin máximo fijo.
+
+**Razón:** Un mínimo de 6 reduce falsos positivos con strings cortos como `hub_ok` que un usuario podría escribir en un mensaje normal. Sin máximo fijo se tolera un cambio futuro de longitud del código generado sin tener que tocar el detector.
+
+**Implementación:** `src/infrastructure/ref-code.detector.js`.
+
+---
+
 ## 2026-04-19 — Modelo de 3 estados de usuario
 
 **Contexto:** La spec original asumía que un vecino solo podía operar si estaba en un hub activo. Si no había hub cerca, quedaba "afuera".
@@ -37,7 +104,7 @@ Este archivo es un changelog de las decisiones importantes de producto, arquitec
 
 **Decisión:** Entregar AMBOS:
 - Link wa.me para compartir digital (frictionless para vecinos que confían).
-- Código corto (`refCode`, ej: `hub_ABC123`) para boca a boca.
+- Código corto (`refCode`, ej: `hub_ABC12345`) para boca a boca.
 
 **Razón:** Muchos vecinos desconfían de links sueltos por WhatsApp (miedo a estafas). El código les permite escribirlo ellos mismos, ganando credibilidad. Cubrimos ambos perfiles.
 
